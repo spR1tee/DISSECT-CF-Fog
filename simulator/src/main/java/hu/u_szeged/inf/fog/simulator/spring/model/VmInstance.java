@@ -12,14 +12,43 @@ public class VmInstance {
     private Long id;
     private String name;
     private int cpu;
-    private int memory;
-    private String image;
+    private long ram;
+    private double coreProcessingPower;
+    private int startupProcess;
+    private long reqDisk;
+    private double pricePerTick;
     private double cpuUsage;
     private double memoryUsage;
     private String status;
     private double networkTraffic;
 
     // Getters and setters
+
+
+    public long getReqDisk() {
+        return reqDisk;
+    }
+
+    public void setReqDisk(long reqDisk) {
+        this.reqDisk = reqDisk;
+    }
+
+    public int getStartupProcess() {
+        return startupProcess;
+    }
+
+    public void setStartupProcess(int startupProcess) {
+        this.startupProcess = startupProcess;
+    }
+
+    public double getPricePerTick() {
+        return pricePerTick;
+    }
+
+    public void setPricePerTick(double pricePerTick) {
+        this.pricePerTick = pricePerTick;
+    }
+
     public String getName() {
         return name;
     }
@@ -36,20 +65,20 @@ public class VmInstance {
         this.cpu = cpu;
     }
 
-    public int getMemory() {
-        return memory;
+    public long getRam() {
+        return ram;
     }
 
-    public void setMemory(int memory) {
-        this.memory = memory;
+    public void setRam(long ram) {
+        this.ram = ram;
     }
 
-    public String getImage() {
-        return image;
+    public double getCoreProcessingPower() {
+        return coreProcessingPower;
     }
 
-    public void setImage(String image) {
-        this.image = image;
+    public void setCoreProcessingPower(double coreProcessingPower) {
+        this.coreProcessingPower = coreProcessingPower;
     }
 
     public double getCpuUsage() {
