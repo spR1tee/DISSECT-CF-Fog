@@ -1,6 +1,8 @@
 package hu.u_szeged.inf.fog.simulator.spring;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import hu.mta.sztaki.lpds.cloud.simulator.iaas.VMManager;
+import hu.mta.sztaki.lpds.cloud.simulator.io.NetworkNode;
 import hu.u_szeged.inf.fog.simulator.spring.model.VmData;
 import hu.u_szeged.inf.fog.simulator.spring.service.SimulatorService;
 import hu.u_szeged.inf.fog.simulator.spring.service.VmInstanceService;
@@ -32,6 +34,8 @@ public class SimulatorController {
         } catch (IOException e) {
             e.printStackTrace();
             return ResponseEntity.status(500).body("Error while processing data.");
+        } catch (VMManager.VMManagementException | NetworkNode.NetworkException e) {
+            throw new RuntimeException(e);
         }
     }
 }

@@ -1,7 +1,15 @@
 package hu.u_szeged.inf.fog.simulator.spring.service;
 
+import hu.mta.sztaki.lpds.cloud.simulator.Timed;
+import hu.mta.sztaki.lpds.cloud.simulator.energy.powermodelling.PowerState;
+import hu.mta.sztaki.lpds.cloud.simulator.iaas.PhysicalMachine;
+import hu.mta.sztaki.lpds.cloud.simulator.iaas.VMManager;
+import hu.mta.sztaki.lpds.cloud.simulator.iaas.VirtualMachine;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.constraints.AlterableResourceConstraints;
+import hu.mta.sztaki.lpds.cloud.simulator.io.NetworkNode;
+import hu.mta.sztaki.lpds.cloud.simulator.io.Repository;
 import hu.mta.sztaki.lpds.cloud.simulator.io.VirtualAppliance;
+import hu.mta.sztaki.lpds.cloud.simulator.util.PowerTransitionGenerator;
 import hu.u_szeged.inf.fog.simulator.provider.Instance;
 import hu.u_szeged.inf.fog.simulator.spring.model.VmData;
 import hu.u_szeged.inf.fog.simulator.spring.model.VmInstance;
@@ -13,8 +21,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 @Service
 public class SimulatorService {
@@ -23,10 +30,108 @@ public class SimulatorService {
     private VmInstanceService vmInstanceService;
 
     private final List<VirtualAppliance> virtualAppliances = new ArrayList<>();
+    private final List<VirtualMachine> VMs = new ArrayList<>();
     private final List<Instance> instances = new ArrayList<>();
     private final RestTemplate restTemplate = new RestTemplate();
     private final HttpHeaders headers = new HttpHeaders();
-    private int counter = 0;
+    Repository repo;
+    PhysicalMachine pm;
+
+    public SimulatorService() throws NetworkNode.NetworkException {
+        long storageSize = 107_374_182_400L; // 100 GB
+        long bandwidth = 12_500; // 100 Mbps
+
+        final EnumMap<PowerTransitionGenerator.PowerStateKind, Map<String, PowerState>> transitions =
+                PowerTransitionGenerator.generateTransitions(20, 200, 300, 10, 20);
+
+        this.repo = new Repository(storageSize, "repo", bandwidth, bandwidth, bandwidth, new HashMap<String, Integer>(),
+                transitions.get(PowerTransitionGenerator.PowerStateKind.storage),
+                transitions.get(PowerTransitionGenerator.PowerStateKind.network));
+
+        repo.setState(NetworkNode.State.RUNNING);
+
+        this.pm = new PhysicalMachine(8, 1, 8589934592L, repo, 0, 10_000,
+                transitions.get(PowerTransitionGenerator.PowerStateKind.host));
+        pm.turnon();
+    }
+
+    public void handleRequest(VmData vmData) throws VMManager.VMManagementException, NetworkNode.NetworkException {
+        String request_type = vmData.getRequestType().toUpperCase();
+        switch (request_type) {
+            case "UPDATE":
+                if (VMs.isEmpty()) {
+                    for (VmInstance vmInstance : vmData.getVmInstances()) {
+                        createVM(vmInstance);
+                    }
+                    for (VirtualMachine vm : VMs) {
+                        System.out.println("First: " + vm.getResourceAllocation().allocated);
+                    }
+                    Timed.simulateUntilLastEvent();
+                } else {
+                    for (VmInstance vmInstance : vmData.getVmInstances()) {
+                        VirtualMachine vm = getVM(vmInstance.getName());
+                        if (checkDiff(vm, vmInstance)) {
+                            vm.switchoff(true);
+                            vm.switchOn(pm.allocateResources(new AlterableResourceConstraints(vmInstance.getCpu(),
+                                    vmInstance.getCoreProcessingPower(), vmInstance.getRam()), true, PhysicalMachine.defaultAllocLen), repo);
+                            System.out.println("Changed: ");
+                        } else {
+                            System.out.println("Not Changed");
+                        }
+                        System.out.println(vm.getResourceAllocation().allocated);
+                    }
+                    Timed.simulateUntilLastEvent();
+                }
+                break;
+            case "REQUEST PREDICTION":
+                // TO DO call prediction functions
+                break;
+            case "REQUEST FUTURE BEHAVIOR":
+                //TO DO
+                break;
+            default:
+                System.err.println("Error: Unknown Request Type");
+                break;
+        }
+    }
+
+    public void createVM(VmInstance vmInstance) throws VMManager.VMManagementException, NetworkNode.NetworkException {
+        createVirtualAppliance(vmInstance);
+        repo.registerObject(getVA(vmInstance.getName()));
+        VMs.add(pm.requestVM(getVA(vmInstance.getName()),
+                new AlterableResourceConstraints(vmInstance.getCpu(), vmInstance.getCoreProcessingPower(), vmInstance.getRam()), repo, 1)[0]);
+    }
+
+    public VirtualAppliance getVA(String id) {
+        for (VirtualAppliance va : virtualAppliances) {
+            if (va.id.equals(id)) {
+                return va;
+            }
+        }
+        System.err.println("VirtualAppliance not found.");
+        return null;
+    }
+
+    public VirtualMachine getVM(String id) {
+        for (VirtualMachine vm : VMs) {
+            if (vm.getVa().id.equals(id)) {
+                return vm;
+            }
+        }
+        System.err.println("VirtualMachine not found.");
+        return null;
+    }
+
+
+    public void createVirtualAppliance(VmInstance vmInstance) {
+        virtualAppliances.add(new VirtualAppliance(vmInstance.getName(), vmInstance.getStartupProcess(), 0, false, vmInstance.getReqDisk()));
+    }
+
+    public void createInstance(VmInstance vmInstance) {
+        instances.add(new Instance(vmInstance.getName(),
+                new VirtualAppliance(vmInstance.getName(), vmInstance.getStartupProcess(), 0, false, vmInstance.getReqDisk()),
+                new AlterableResourceConstraints(vmInstance.getCpu(), vmInstance.getCoreProcessingPower(), vmInstance.getRam()), vmInstance.getPricePerTick()));
+    }
 
     public String sendData(String data, String url) {
 
@@ -38,29 +143,10 @@ public class SimulatorService {
         return response.getBody();
     }
 
-    public void handleRequest(VmData vmData) {
-        String request_type = vmData.getRequestType().toUpperCase();
-        if (request_type.equals("UPDATE")) {
-            if (Instance.allInstances.isEmpty()) {
-                for (VmInstance vmInstance : vmData.getVmInstances()) {
-                    virtualAppliances.add(new VirtualAppliance("va" + counter, vmInstance.getStartupProcess(),0, false, vmInstance.getReqDisk()));
-                    AlterableResourceConstraints arc = new AlterableResourceConstraints(vmInstance.getCpu(), vmInstance.getCoreProcessingPower(), vmInstance.getRam());
-                    instances.add(new Instance("instance" + counter, virtualAppliances.get(counter), arc, vmInstance.getPricePerTick() / 60 / 60 / 1000));
-                    counter++;
-                }
-            } else {
-                // TO DO update the values of the instances if needed
-                for (Instance instance : instances) {
-                    System.out.println(instance);
-                }
-            }
-        } else if (request_type.equals("REQUEST PREDICTION")) {
-            // TO DO call prediction functions
-        } else if (request_type.equals("REQUEST FUTURE BEHAVIOR")) {
-            //TO DO
-        } else {
-            System.err.println("Error: Unknown Request Type");
-        }
+    public boolean checkDiff(VirtualMachine vm, VmInstance vi) {
+        return vm.getResourceAllocation().allocated.getRequiredMemory() != vi.getRam() ||
+                vm.getResourceAllocation().allocated.getRequiredCPUs() != vi.getCpu() ||
+                vm.getResourceAllocation().allocated.getRequiredProcessingPower() != vi.getCoreProcessingPower();
     }
 }
 
